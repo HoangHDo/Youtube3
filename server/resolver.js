@@ -129,6 +129,13 @@ async function resolveWithYtdlp(id) {
     timeout: config.upstreamTimeoutMs * 2,
     windowsHide: true,
     maxBuffer: 32 * 1024 * 1024,
+    // Surface yt-dlp's own message. Its default error is a truncated
+    // "Command failed: <binary> -J --no-warnings ..." dump, which hid the only
+    // useful part - "Sign in to confirm you're not a bot".
+    env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+  }).catch((error) => {
+    const detail = String(error?.stderr || error?.message || error).trim();
+    throw new Error(`yt-dlp: ${detail.slice(0, 400)}`);
   });
 
   const info = JSON.parse(stdout);
@@ -343,10 +350,39 @@ async function attempt(id, maxQuality, quiet = false) {
   }
 
   const value = buildStreams(meta, maxQuality);
+  // Carry why we degraded. A bare "No stream available" sends people hunting
+  // for a missing binary when the real cause is often a datacenter IP being
+  // bot-checked by YouTube.
+  if (value.degraded && errors.length) {
+    value.diagnostics = errors;
+    value.blocked = classifyBlock(errors);
+  }
   // oembed-only results carry no formats, so don't cache them for long.
-  const ttl = meta.degraded ? 30_000 : config.cacheTtlMs;
+  const ttl = meta.degraded ? 120_000 : config.cacheTtlMs;
   cache.set(`${id}:${maxQuality}`, { expires: Date.now() + ttl, value });
   return value;
+}
+
+/** Recognise the failure modes a hosted deployment actually hits. */
+export function classifyBlock(errors = []) {
+  const text = Array.isArray(errors) ? errors.join(' ').toLowerCase() : String(errors).toLowerCase();
+
+  // Age gating first: "Sign in to confirm your age" also matches the bot-check
+  // wording, and mislabelling it sends users to fix the wrong thing.
+  if (/age.?restricted|confirm your age|inappropriate for some users/.test(text)) {
+    return 'age_gated';
+  }
+  if (/sign in to confirm|not a bot|login required/.test(text)) return 'youtube_bot_check';
+  if (/\b429\b|too many requests|rate.?limit/.test(text)) return 'youtube_rate_limited';
+  // Geo before generic "unavailable". YouTube's real wording is
+  // "The uploader has not made this video available in your country".
+  if (/in your country|geo.?restricted|blocked it in your country/.test(text)) {
+    return 'geo_blocked';
+  }
+  if (/members-only|join this channel|private video|video unavailable|has been removed/.test(text)) {
+    return 'video_restricted';
+  }
+  return 'unknown';
 }
 
 /**

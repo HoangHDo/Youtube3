@@ -136,6 +136,32 @@ The resolver searches, in order: `$YTDLP_PATH` → `./bin/yt-dlp` (how the Docke
 image vendors it) → `yt-dlp` on `PATH`. Whichever answers `--version` first is
 the binary that gets used.
 
+### If it says "confirm you're not a bot"
+
+YouTube blocks datacenter and cloud IP ranges. `Sign in to confirm you're not a
+bot` is an IP reputation block from YouTube, not an application bug — the app is
+working correctly and the request never reaches a playable response. Render,
+Railway, Fly and most shared hosts are affected.
+
+Verified working, in order of preference:
+
+1. **Run the server on your own machine.** A residential IP is not blocked. This
+   is what actually fixes it.
+2. **Route yt-dlp through a proxy** with a clean or residential IP:
+   ```bash
+   YTDLP_PROXY=socks5://user:pass@host:1080
+   ```
+   Note this only affects resolution. The media relay fetches from your
+   server's IP, which YouTube also polices for bandwidth.
+3. **Use cookies**, which can satisfy the check on some IPs:
+   ```bash
+   YTDLP_COOKIES=/path/cookies.txt
+   ```
+
+Trying different `YTDLP_PLAYER_CLIENT` values is worth one attempt, but it does
+not defeat an IP-level block. `/api/health` stays green in this state, and
+`/api/resolve` reports `blocked: "youtube_bot_check"` so you can confirm it.
+
 ### Cloud IPs need a player client
 
 Datacenter and cloud IPs are frequently served a bot-check or consent page

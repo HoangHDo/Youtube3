@@ -533,14 +533,7 @@ async function play(input, { source = 'input', refresh = false } = {}) {
     });
 
     if (!video.playable) {
-      showError(
-        'No stream available',
-        video.degraded
-          ? 'Metadata loaded but no stream could be extracted, which almost always means the ' +
-            'server has no working yt-dlp. Check the settings panel for the resolver status, ' +
-            'and confirm the server log does not say "yt-dlp unavailable".'
-          : 'This video has no downloadable stream (it may be private, region locked, or a live premiere).',
-      );
+      showError('No stream available', explainFailure(video));
       setStatus('error');
       return;
     }
@@ -794,6 +787,52 @@ function showError(title, body) {
 
 function hideError() {
   el.errorBox.hidden = true;
+}
+
+/**
+ * Turn a resolver outcome into something the user can act on.
+ *
+ * "YouTube is refusing this server's IP" and "the server is missing a binary"
+ * look identical from the outside but need completely different fixes, so the
+ * server tells us which it was via `blocked`.
+ */
+function explainFailure(video) {
+  const blocked = video?.blocked;
+  const diag = Array.isArray(video?.diagnostics) ? video.diagnostics : [];
+
+  if (blocked === 'youtube_bot_check') {
+    return (
+      'YouTube is refusing requests from this server ("confirm you are not a bot"). ' +
+      'This is an IP reputation block on the hosting provider, not a bug in the app. ' +
+      'It is fixed by streaming through a different network - run the server at home, ' +
+      'or set YTDLP_PROXY to an outbound proxy with a residential IP.'
+    );
+  }
+  if (blocked === 'youtube_rate_limited') {
+    return (
+      'YouTube is rate-limiting this server (HTTP 429). Shared datacenter IPs get ' +
+      'throttled quickly. Try again in a few minutes, lower traffic, or route through ' +
+      'a different IP with YTDLP_PROXY.'
+    );
+  }
+  if (blocked === 'age_gated') {
+    return 'This video is age restricted. Set YTDLP_COOKIES or YTDLP_COOKIES_FROM_BROWSER on the server.';
+  }
+  if (blocked === 'video_restricted') {
+    return 'This video is private, members-only, or has been removed.';
+  }
+  if (blocked === 'geo_blocked') {
+    return 'This video is not available from the server\'s region.';
+  }
+
+  if (video?.degraded) {
+    return (
+      'Metadata loaded but no stream could be extracted. The server log has the reason' +
+      (diag.length ? `: ${diag[0].slice(0, 160)}` : '.') +
+      ' If it mentions a missing yt-dlp, redeploy or install it.'
+    );
+  }
+  return 'This video has no downloadable stream (it may be private, region locked, or a live premiere).';
 }
 
 function friendlyError(error) {

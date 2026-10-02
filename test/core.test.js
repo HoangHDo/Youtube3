@@ -192,6 +192,34 @@ test('selectHlsSource returns null when there is no HLS at all', () => {
 });
 
 /* ---------------------------------------------------------------- *
+ * Failure classification
+ * ---------------------------------------------------------------- */
+
+test('classifies the failures a hosted deployment actually hits', async () => {
+  const { classifyBlock } = await import('../server/resolver.js');
+
+  // This is the exact error Render produced.
+  assert.equal(
+    classifyBlock(['ytdlp: Command failed', 'ytdl-core: Sign in to confirm you’re not a bot']),
+    'youtube_bot_check',
+  );
+  assert.equal(classifyBlock(['ytdl-core failed - Status code: 429']), 'youtube_rate_limited');
+  assert.equal(classifyBlock(['ytdlp: Private video. Sign in if you’ve been granted access']), 'video_restricted');
+  assert.equal(classifyBlock(['ytdlp: Sign in to confirm your age']), 'age_gated');
+  assert.equal(classifyBlock(['ytdlp: The uploader has not made this video available in your country']), 'geo_blocked');
+  assert.equal(classifyBlock(['ytdlp: Video unavailable']), 'video_restricted');
+  assert.equal(classifyBlock(['ytdlp: yt-dlp unavailable: spawn yt-dlp ENOENT']), 'unknown');
+  assert.equal(classifyBlock([]), 'unknown');
+});
+
+test('a missing binary is not mistaken for a bot check', async () => {
+  const { classifyBlock } = await import('../server/resolver.js');
+  // Guards the regression that sent people installing yt-dlp when the real
+  // problem was an IP block.
+  assert.notEqual(classifyBlock(['no yt-dlp binary found. Tried -> yt-dlp: ENOENT']), 'youtube_bot_check');
+});
+
+/* ---------------------------------------------------------------- *
  * Resolver discovery
  * ---------------------------------------------------------------- */
 
