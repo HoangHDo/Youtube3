@@ -3,6 +3,18 @@
 # The critical piece is the Dockerfile: Render's default Node runtime has no
 # yt-dlp, and the pure-JS fallback cannot play anything. Building the image
 # bakes the binary in.
+# NOTE: this blueprint builds with Docker (see Dockerfile).
+#
+# If your service already exists as a plain "Web Service" on the Node runtime,
+# Render IGNORES the Dockerfile and uses its own Node image, which has no
+# yt-dlp - that is what produces "No stream available". Two ways out:
+#
+#   1. Recommended: delete the service and redeploy as a Blueprint so this file
+#      is applied, or in the dashboard set Runtime -> Docker and point at
+#      ./Dockerfile.
+#   2. Or stay on the Node runtime: the app self-provisions yt-dlp at boot via
+#      server/install.js (it downloads the binary into ./bin). This works, it is
+#      just slower on first boot.
 services:
   - type: web
     name: cyberstream

@@ -2,6 +2,7 @@ import express from 'express';
 import fs from 'node:fs';
 import { config } from './config.js';
 import { fetchCatalogFeed, localCatalog } from './catalog.js';
+import { ensureYtdlp, inspectVendored } from './install.js';
 import { cacheStats, clearCache, probeYtdlp, resolveVideo, resetYtdlpProbe } from './resolver.js';
 import { proxyMedia, proxyPlaylist } from './stream.js';
 import * as store from './store.js';
@@ -60,6 +61,8 @@ app.get(
         // ytdl-core is installed but is effectively dead against current
         // YouTube; reported so the settings panel can say so honestly.
         ytdlCore: 'unreliable',
+        vendored: await inspectVendored(),
+        autoInstall: process.env.YTDLP_AUTOINSTALL !== '0',
       },
       cache: cacheStats(),
       signedLinksEphemeral: config.proxySecretIsEphemeral,
@@ -351,17 +354,30 @@ app.use((error, _req, res, _next) => {
 store.loadState();
 
 const server = app.listen(config.port, config.host, async () => {
-  const ytdlp = await probeYtdlp();
-  const ytdlCore = await import('@distube/ytdl-core')
-    .then(() => 'available')
-    .catch(() => 'missing');
-
   console.log('');
   console.log('  \x1b[1;31m⚡ CYBERSTREAM\x1b[0m  \x1b[2mv1.0.0\x1b[0m');
   console.log(`  \x1b[2mhttp://localhost:${config.port}\x1b[0m`);
   console.log('');
-  console.log(`  yt-dlp      ${ytdlp.ok ? `\x1b[32m${ytdlp.version}\x1b[0m` : '\x1b[33mnot found\x1b[0m'}`);
-  console.log(`  ytdl-core   ${ytdlCore === 'available' ? '\x1b[32mavailable\x1b[0m' : '\x1b[33mnot installed\x1b[0m'}`);
+  console.log('  \x1b[2mprovisioning stream resolver...\x1b[0m');
+
+  // Hosts without yt-dlp cannot play anything, so try to fetch it rather than
+  // serving an app that only ever shows metadata.
+  const install = await ensureYtdlp({ log: (msg) => console.log(`  \x1b[2m${msg}\x1b[0m`) });
+  if (install.installed) resetYtdlpProbe();
+  else if (install.reason && !install.reason.includes('already present')) {
+    console.log(`  \x1b[2mskipped: ${install.reason}\x1b[0m`);
+  }
+
+  const ytdlp = await probeYtdlp();
+
+  console.log('');
+  if (ytdlp.ok) {
+    console.log(`  yt-dlp      \x1b[32m${ytdlp.version}\x1b[0m  \x1b[2m${ytdlp.bin}\x1b[0m`);
+  } else {
+    console.log('  yt-dlp      \x1b[31mNOT AVAILABLE - playback will fail\x1b[0m');
+    console.log('  \x1b[2minstall with: pip install -U yt-dlp   (or deploy via the Dockerfile)\x1b[0m');
+  }
+  console.log('  ytdl-core   \x1b[33munreliable\x1b[0m  \x1b[2mcannot parse current YouTube; yt-dlp is required\x1b[0m');
   console.log(`  max quality ${config.maxQuality}p`);
   if (config.proxySecretIsEphemeral) {
     console.log('  \x1b[2mnote: PROXY_SECRET is unset, proxy links expire on restart\x1b[0m');

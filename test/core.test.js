@@ -213,6 +213,24 @@ test('probing yt-dlp reports the binary that actually worked', async () => {
   assert.ok(probe.version.length > 0, 'probe did not capture a version');
 });
 
+test('yt-dlp self-provisioning reports honestly instead of throwing', async () => {
+  // The container failure mode: no binary anywhere. ensureYtdlp must resolve
+  // with a reason rather than rejecting, or the app cannot boot at all.
+  const { ensureYtdlp, inspectVendored } = await import('../server/install.js');
+
+  const before = await inspectVendored();
+  assert.ok(before.path, 'inspectVendored did not report a path');
+
+  const optOut = await ensureYtdlp();
+  assert.equal(typeof optOut.installed, 'boolean');
+  assert.ok(optOut.installed || optOut.reason, 'neither installed nor explained');
+
+  if (optOut.installed) {
+    // If it did download, the file must be real and runnable, not an HTML page.
+    assert.ok(optOut.version && optOut.version.length > 0, 'installed but no version');
+  }
+});
+
 test('a bogus YTDLP_PATH does not prevent discovery', async () => {
   // This is the deployed-container failure: a Windows path on Linux. The
   // resolver has to fall through to ./bin/yt-dlp or PATH.

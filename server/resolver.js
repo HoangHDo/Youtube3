@@ -233,6 +233,39 @@ export function clearCache() {
   inflight.clear();
 }
 
+let reprovisioned = false;
+
+/**
+ * Last-ditch recovery: if every resolver just failed *and* yt-dlp is missing,
+ * try to provision it once and retry.
+ *
+ * This matters on hosts where the binary arrives after boot (or where boot
+ * provisioning raced), and turns a hard failure into a working request instead
+ * of an error page the user has to retry by hand.
+ */
+async function reprovisionAndRetry() {
+  if (reprovisioned) return false;
+  reprovisioned = true;
+
+  const probe = await probeYtdlp();
+  if (probe.ok) {
+    // Installed after boot (e.g. someone dropped it in), just use it.
+    console.warn('[resolver] yt-dlp appeared after boot - re-probing');
+    return true;
+  }
+
+  const { ensureYtdlp } = await import('./install.js');
+  const result = await ensureYtdlp({ log: (msg) => console.warn(`[resolver] ${msg}`) });
+  if (result.installed || (await probeYtdlp()).ok) {
+    resetYtdlpProbe();
+    console.warn('[resolver] provisioned yt-dlp, retrying');
+    return true;
+  }
+
+  console.warn(`[resolver] could not provision yt-dlp: ${result.reason}`);
+  return false;
+}
+
 /**
  * Resolve a video id to metadata + proxied stream descriptors.
  * @param {string} id
@@ -254,45 +287,60 @@ export async function resolveVideo(id, options = {}) {
   if (inflight.has(key)) return inflight.get(key);
 
   const task = (async () => {
-    const attempts = [
-      ['ytdlp', resolveWithYtdlp],
-      ['ytdl-core', resolveWithYtdlCore],
-      ['oembed', resolveWithOembed],
-    ];
+    const value = await attempt(id, maxQuality);
 
-    const errors = [];
-    let meta = null;
-
-    for (const [name, run] of attempts) {
-      try {
-        meta = await run(id);
-        if (name !== 'ytdlp') {
-          console.warn(`[resolver] ${id}: fell back to ${name} (ytdlp/ytdl-core unavailable)`);
-        }
-        break;
-      } catch (error) {
-        const reason = String(error?.message || error).slice(0, 180);
-        errors.push(`${name}: ${reason}`);
-        console.warn(`[resolver] ${id}: ${name} failed - ${reason}`);
-      }
+    // If we only ever got unplayable metadata and yt-dlp is absent, try to
+    // provision it and resolve for real before giving up on this request.
+    if (value.degraded && (await reprovisionAndRetry())) {
+      const retried = await attempt(id, maxQuality, true);
+      if (!retried.degraded) return retried;
+      return retried;
     }
 
-    if (!meta) {
-      const error = new Error('Unable to resolve this video');
-      error.status = 502;
-      error.detail = errors.join(' | ');
-      throw error;
-    }
-
-    const value = buildStreams(meta, maxQuality);
-    // oembed-only results carry no formats, so don't cache them for long.
-    const ttl = meta.degraded ? 30_000 : config.cacheTtlMs;
-    cache.set(key, { expires: Date.now() + ttl, value });
     return value;
   })().finally(() => inflight.delete(key));
 
   inflight.set(key, task);
   return task;
+}
+
+/** One pass down the resolver chain. */
+async function attempt(id, maxQuality, quiet = false) {
+  const attempts = [
+    ['ytdlp', resolveWithYtdlp],
+    ['ytdl-core', resolveWithYtdlCore],
+    ['oembed', resolveWithOembed],
+  ];
+
+  const errors = [];
+  let meta = null;
+
+  for (const [name, run] of attempts) {
+    try {
+      meta = await run(id);
+      if (name !== 'ytdlp' && !quiet) {
+        console.warn(`[resolver] ${id}: fell back to ${name} (ytdlp/ytdl-core unavailable)`);
+      }
+      break;
+    } catch (error) {
+      const reason = String(error?.message || error).slice(0, 180);
+      errors.push(`${name}: ${reason}`);
+      if (!quiet) console.warn(`[resolver] ${id}: ${name} failed - ${reason}`);
+    }
+  }
+
+  if (!meta) {
+    const error = new Error('Unable to resolve this video');
+    error.status = 502;
+    error.detail = errors.join(' | ');
+    throw error;
+  }
+
+  const value = buildStreams(meta, maxQuality);
+  // oembed-only results carry no formats, so don't cache them for long.
+  const ttl = meta.degraded ? 30_000 : config.cacheTtlMs;
+  cache.set(`${id}:${maxQuality}`, { expires: Date.now() + ttl, value });
+  return value;
 }
 
 /**
@@ -321,7 +369,8 @@ function buildStreams(meta, maxQuality) {
   const ladder = buildLadder(formats, { maxHeight: maxQuality });
 
   // Give every proxied link the same generous lifetime as the cache entry.
-  const ttl = meta.degraded ? 30_000 : Math.max(config.cacheTtlMs, 10 * 60 * 1000);
+  // oEmbed results carry no streams, so there is nothing to keep alive.
+  const ttl = meta.degraded ? 120_000 : Math.max(config.cacheTtlMs, 10 * 60 * 1000);
 
   const descriptor = (fmt, kind) =>
     fmt && {

@@ -96,6 +96,32 @@ docker build -t cyberstream .
 docker run -d -p 5173:5173 -e PROXY_SECRET="$(openssl rand -hex 32)" cyberstream
 ```
 
+### Plain Node hosts (no Dockerfile)
+
+If your platform builds with its own Node image, the app provisions yt-dlp
+itself: at install (`postinstall`) and again at boot, it downloads the official
+standalone binary into `./bin/yt-dlp`, and the resolver finds it there. First
+boot is slower because of the ~18 MB download.
+
+Disable with `YTDLP_AUTOINSTALL=0`.
+
+### Diagnosing a live deployment
+
+```bash
+curl https://your-site.onrender.com/api/health
+```
+
+```json
+{ "resolver": { "ytdlp": "2026.08.19", "ytdlpBin": "/app/bin/yt-dlp" } }   <- healthy
+{ "resolver": { "ytdlp": null, "ytdlpError": "spawn yt-dlp ENOENT" } }     <- broken
+```
+
+`ytdlp: null` with `ENOENT` means the binary is missing — the UI will say
+"No stream available" because the only thing left is unplayable oEmbed
+metadata. If `ytdlp` reports a version but playback still fails, it is almost
+always YouTube refusing the datacenter IP; check the container log for
+`[resolver] <id>: ytdlp failed - ...` and try `YTDLP_PLAYER_CLIENT=tv,web_safari`.
+
 ### Why yt-dlp matters so much
 
 This is the single most common deployment failure, so it is worth being blunt:
@@ -142,6 +168,7 @@ Dockerfile      bakes yt-dlp into a node:22-slim image
 render.yaml     Render blueprint (blueprint deploy = one click)
 server/
   index.js      Express app, routes, static serving
+  install.js    downloads yt-dlp when the host does not have it
   resolver.js   yt-dlp / ytdl-core / oEmbed cascade + cache
   youtube.js    URL parsing and format selection  (pure, unit tested)
   sign.js       HMAC-signed proxy URLs            (pure, unit tested)

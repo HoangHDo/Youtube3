@@ -13,7 +13,9 @@
     "dev": "node --watch server/index.js",
     "test": "node --test \"test/*.test.js\"",
     "doctor": "node scripts/doctor.js",
-    "postinstall": "node scripts/doctor.js"
+    "prepare-runtime": "node scripts/prepare-runtime.js",
+    "prebuild": "node scripts/prepare-runtime.js",
+    "postinstall": "node scripts/prepare-runtime.js && node scripts/doctor.js"
   },
   "dependencies": {
     "express": "^4.19.2"
