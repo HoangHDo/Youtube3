@@ -85,10 +85,18 @@ export async function ensureYtdlp({ timeout = 120_000, log = console.warn } = {}
     const bytes = Buffer.from(await res.arrayBuffer());
 
     // A redirect to an HTML error page is the classic way this silently
-    // produces a file that cannot execute.
-    const head = bytes.subarray(0, 2).toString('latin1');
-    if (head !== 'MZ' && head !== '#!') {
-      throw new Error(`unexpected payload (starts with ${JSON.stringify(head)}) - not a binary`);
+    // produces a file that cannot execute. Real payloads are either a Windows
+    // PE ("MZ"), a shebang script ("#!"), or a PyInstaller bundle ("MEI" at
+    // offset 0x2C - which is why an MZ-only check produced a false alarm).
+    const isElf = bytes[0] === 0x7f && bytes[1] === 0x45 && bytes[2] === 0x4c && bytes[3] === 0x46;
+    const head2 = bytes.subarray(0, 2).toString('latin1');
+    const pyinstaller = bytes.subarray(0x2c, 0x2f).toString('latin1') === 'MEI';
+    const looksExecutable = head2 === 'MZ' || head2 === '#!' || isElf || pyinstaller;
+
+    if (!looksExecutable) {
+      throw new Error(
+        `unexpected payload (starts with ${JSON.stringify(bytes.subarray(0, 8).toString('latin1'))}) - not a binary`,
+      );
     }
     if (bytes.length < 1_000_000) {
       throw new Error(`suspiciously small (${bytes.length} bytes)`);
