@@ -81,9 +81,65 @@ broke*, and the health endpoint reports which resolver is actually live.
 
 ---
 
+## Deploying
+
+### Render.com (one click)
+
+Push the repo, then **New → Blueprint** and point it at this repository.
+`render.yaml` tells Render to build with the included `Dockerfile`, which bakes
+yt-dlp into the image and sets `YTDLP_PATH` for you.
+
+### Any Docker host
+
+```bash
+docker build -t cyberstream .
+docker run -d -p 5173:5173 -e PROXY_SECRET="$(openssl rand -hex 32)" cyberstream
+```
+
+### Why yt-dlp matters so much
+
+This is the single most common deployment failure, so it is worth being blunt:
+**the pure-JS `@distube/ytdl-core` fallback no longer works.** It fails with
+`Failed to find any playable formats` against current YouTube responses. A
+server without the yt-dlp binary can still show title, thumbnail and duration
+(via oEmbed) but cannot play a single frame — which is exactly the
+"No stream available" screen. `npm run doctor` reports it as a warning, and the
+settings panel shows it as `unreliable` rather than pretending otherwise.
+
+The resolver searches, in order: `$YTDLP_PATH` → `./bin/yt-dlp` (how the Docker
+image vendors it) → `yt-dlp` on `PATH`. Whichever answers `--version` first is
+the binary that gets used.
+
+### Cloud IPs need a player client
+
+Datacenter and cloud IPs are frequently served a bot-check or consent page
+instead of the player response, which breaks resolution on hosted instances.
+`YTDLP_PLAYER_CLIENT` (default `default,android,web`) makes yt-dlp impersonate
+browser clients and is what makes hosted deployments work in practice.
+
+### Environment variables on a host
+
+Set these in your dashboard — **not** in a committed `.env`:
+
+| Variable | Why |
+| --- | --- |
+| `PROXY_SECRET` | **Set it.** Otherwise proxy links die on every restart. |
+| `YTDLP_PATH` | Only if not using the bundled Dockerfile. |
+| `YTDLP_PLAYER_CLIENT` | Usually leave at the default. |
+| `YTDLP_COOKIES_FROM_BROWSER` | Only for age-gated / region-locked videos. |
+| `MAX_QUALITY` | Server-wide ceiling. |
+
+`data/` is a volume-less local directory, so history and saved videos reset on
+redeploy. That is fine for a dashboard; mount a volume if you need them to
+persist.
+
+---
+
 ## Project layout
 
 ```
+Dockerfile      bakes yt-dlp into a node:22-slim image
+render.yaml     Render blueprint (blueprint deploy = one click)
 server/
   index.js      Express app, routes, static serving
   resolver.js   yt-dlp / ytdl-core / oEmbed cascade + cache

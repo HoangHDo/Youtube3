@@ -1,0 +1,38 @@
+# Render.com blueprint. Deploy with: New -> Blueprint -> point at this repo.
+#
+# The critical piece is the Dockerfile: Render's default Node runtime has no
+# yt-dlp, and the pure-JS fallback cannot play anything. Building the image
+# bakes the binary in.
+services:
+  - type: web
+    name: cyberstream
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter          # a free instance may be throttled or idle out
+    healthCheckPath: /api/health
+    # YouTube rate-limits aggressively from shared/datacenter IPs.
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5173
+      - key: HOST
+        value: 0.0.0.0
+      - key: MAX_QUALITY
+        value: 1080
+      - key: CACHE_TTL_MS
+        value: 300000
+      - key: UPSTREAM_TIMEOUT_MS
+        value: 20000
+      - key: PROXY_TIMEOUT_MS
+        value: 120000
+      - key: YTDLP_PATH
+        value: /app/bin/yt-dlp
+      # Set this in the Render dashboard. Without it, proxy links are only
+      # valid until the container restarts.
+      - key: PROXY_SECRET
+        generateValue: true
+      # Optional. Needed for age-gated or region-locked videos.
+      # - key: YTDLP_COOKIES_FROM_BROWSER
+      #   sync: false

@@ -536,7 +536,9 @@ async function play(input, { source = 'input', refresh = false } = {}) {
       showError(
         'No stream available',
         video.degraded
-          ? 'The metadata service answered but no media stream could be extracted. Try again, or install yt-dlp.'
+          ? 'Metadata loaded but no stream could be extracted, which almost always means the ' +
+            'server has no working yt-dlp. Check the settings panel for the resolver status, ' +
+            'and confirm the server log does not say "yt-dlp unavailable".'
           : 'This video has no downloadable stream (it may be private, region locked, or a live premiere).',
       );
       setStatus('error');
@@ -805,8 +807,12 @@ function friendlyError(error) {
 
   // Surface the resolver's own diagnosis when we have one - it is usually
   // the difference between "install yt-dlp" and "try another video".
-  if (error?.detail && /yt-dlp unavailable|ytdl-core not installed/i.test(error.detail)) {
-    return `${base} No stream resolver is available - run \`npm run doctor\` to see what is missing.`;
+  if (error?.detail && /yt-dlp unavailable|no yt-dlp binary found/i.test(error.detail)) {
+    return (
+      'The server has no working yt-dlp, so nothing can be streamed. ' +
+      'Install it (pip install -U yt-dlp), or deploy with the included Dockerfile / render.yaml ' +
+      'which bakes the binary in.'
+    );
   }
   return base;
 }
@@ -846,14 +852,38 @@ async function openSettings() {
 }
 
 function showDiagnostics(health) {
-  const ytdlp = health?.resolver?.ytdlp;
-  el.diagResolver.textContent = ytdlp || 'not installed';
-  el.diagResolver.className = ytdlp ? 'is-ok' : 'is-warn';
-  el.diagCore.textContent = 'available';
-  el.diagCore.className = 'is-ok';
+  const r = health?.resolver || {};
+  const ytdlp = r.ytdlp;
+
+  if (ytdlp) {
+    el.diagResolver.textContent = `${ytdlp}${r.ytdlpBin ? ` (${shortBin(r.ytdlpBin)})` : ''}`;
+    el.diagResolver.className = 'is-ok';
+  } else {
+    // The single most common deployment failure, so say exactly what to do.
+    el.diagResolver.textContent = 'not installed';
+    el.diagResolver.className = 'is-warn';
+    el.diagResolver.title =
+      r.ytdlpError ||
+      'Install yt-dlp, or build via the provided Dockerfile which vendors it into ./bin.';
+  }
+
+  // Be honest rather than optimistic: this fallback no longer works.
+  el.diagCore.textContent = 'unreliable (fails on most videos)';
+  el.diagCore.className = 'is-warn';
+  el.diagCore.title =
+    '@distube/ytdl-core cannot parse current YouTube responses. yt-dlp is required.';
+
   el.diagQuality.textContent = `${health?.maxQuality ?? '?'}p`;
   el.maxQualityValue.textContent = `${health?.maxQuality ?? '?'}p`;
   el.diagUptime.textContent = formatClock(health?.uptimeSeconds ?? 0);
+}
+
+/** Keep a binary path readable in a narrow settings row. */
+function shortBin(bin) {
+  if (!bin) return '';
+  // Handle both separators: a Windows path must not be left to run off the row.
+  const parts = bin.split(/[\\/]/).filter(Boolean);
+  return parts.length <= 1 ? bin : `…${parts.slice(-1).join('')}`;
 }
 
 function restorePreferences() {

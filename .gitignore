@@ -1,6 +1,10 @@
 node_modules/
 data/
+logs/
 *.log
 .env
 .DS_Store
 Thumbs.db
+
+# yt-dlp binary vendored for container builds (see Dockerfile)
+bin/

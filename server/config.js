@@ -58,11 +58,13 @@ export const config = {
   proxyTimeoutMs: int(process.env.PROXY_TIMEOUT_MS, 120_000),
   stateMaxItems: 200,
 
+  // Left empty by default: the resolver probes ./bin/yt-dlp and then PATH, so a
+  // container build can vendor the binary without any env var at all.
+  ytdlpPath: process.env.YTDLP_PATH || '',
+
   userAgent:
     process.env.UPSTREAM_UA ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-
-  ytdlpPath: process.env.YTDLP_PATH || 'yt-dlp',
 
   /**
    * The proxy is only ever allowed to fetch these hosts. Everything else is

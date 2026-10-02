@@ -191,6 +191,47 @@ test('selectHlsSource returns null when there is no HLS at all', () => {
   assert.equal(selectHlsSource(FORMATS.filter((f) => f.protocol !== 'm3u8_native')), null);
 });
 
+/* ---------------------------------------------------------------- *
+ * Resolver discovery
+ * ---------------------------------------------------------------- */
+
+test('probing yt-dlp reports the binary that actually worked', async () => {
+  // Regression: the probe used to test config.ytdlpPath while resolution
+  // executed config.ytdlpPath separately, so a bad override meant probing one
+  // binary and running another. probe.bin must be the one resolution uses.
+  const { probeYtdlp } = await import('../server/resolver.js');
+  const probe = await probeYtdlp();
+
+  if (!probe.ok) {
+    // No yt-dlp anywhere: the error must still name what was tried.
+    assert.match(probe.error, /yt-dlp/i);
+    assert.match(probe.error, /Tried/);
+    return;
+  }
+
+  assert.ok(probe.bin, 'probe did not record which binary worked');
+  assert.ok(probe.version.length > 0, 'probe did not capture a version');
+});
+
+test('a bogus YTDLP_PATH does not prevent discovery', async () => {
+  // This is the deployed-container failure: a Windows path on Linux. The
+  // resolver has to fall through to ./bin/yt-dlp or PATH.
+  const { config } = await import('../server/config.js');
+  const { probeYtdlp, resetYtdlpProbe } = await import('../server/resolver.js');
+
+  const original = config.ytdlpPath;
+  try {
+    config.ytdlpPath = 'C:\\definitely\\not\\here\\yt-dlp.exe';
+    resetYtdlpProbe();
+    const probe = await probeYtdlp();
+    // Whatever the outcome, it must not have blindly trusted the bad path.
+    if (probe.ok) assert.notEqual(probe.bin, config.ytdlpPath);
+  } finally {
+    config.ytdlpPath = original;
+    resetYtdlpProbe();
+  }
+});
+
 test('picks the best audio-only rendition', () => {  assert.equal(selectAudio(FORMATS).formatId, '251');
   assert.equal(selectAudio(FORMATS, { maxBitrate: 128 }).formatId, '140');
 });

@@ -40,7 +40,9 @@ try {
 } catch {
   ytdlCore = 'not installed';
 }
-rows.push(['ytdl-core', ytdlCore, ytdlCore === 'installed']);
+// Marked as a warning, not a success: it is present but cannot parse current
+// YouTube responses, so it is not a usable fallback.
+rows.push(['ytdl-core', ytdlCore === 'installed' ? `${ytdlCore} (unreliable)` : ytdlCore, false]);
 
 rows.push(['express', existsSync(path.join(root, 'node_modules', 'express')) ? 'installed' : 'not installed', existsSync(path.join(root, 'node_modules', 'express'))]);
 
@@ -67,5 +69,6 @@ if (!ytdlpVersion && ytdlCore !== 'installed') {
   console.log('');
 } else {
   console.log(green('  Ready. Run `npm start`.'));
+  console.log(dim('  note: ytdl-core is installed but no longer usable - yt-dlp is what matters.'));
   console.log('');
 }

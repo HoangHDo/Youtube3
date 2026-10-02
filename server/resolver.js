@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import { config } from './config.js';
 import { signUpstream } from './sign.js';
@@ -26,7 +27,7 @@ const inflight = new Map(); // id -> Promise
 
 let ytdlCore = null;
 let ytdlCoreChecked = false;
-let ytdlBinary = null; // { ok, path, version, error }
+let ytdlBinary = null; // { ok, bin, version, error }
 
 async function loadYtdlCore() {
   if (ytdlCoreChecked) return ytdlCore;
@@ -40,17 +41,47 @@ async function loadYtdlCore() {
   return ytdlCore;
 }
 
+/**
+ * Candidate yt-dlp executables, most specific first.
+ *
+ * Containers rarely have it on PATH, and the env override may be wrong (a
+ * Windows path in a Linux deploy is the classic case), so try the common
+ * spellings rather than trusting one.
+ */
+function ytdlpCandidates() {
+  const list = [];
+  if (config.ytdlpPath) list.push(config.ytdlpPath);
+  // A binary vendored next to the app - how the Dockerfile installs it.
+  list.push(path.join(config.root, 'bin', process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'));
+  list.push('yt-dlp', 'yt-dlp.exe', 'youtube-dl', 'youtube-dl.exe');
+  return [...new Set(list.filter(Boolean))];
+}
+
+/**
+ * Locate a working yt-dlp and remember *which* one worked, so resolution runs
+ * the exact binary that was probed instead of re-guessing from config.
+ */
 export async function probeYtdlp() {
   if (ytdlBinary) return ytdlBinary;
-  try {
-    const { stdout } = await execFileAsync(config.ytdlpPath, ['--version'], {
-      timeout: 8000,
-      windowsHide: true,
-    });
-    ytdlBinary = { ok: true, version: String(stdout).trim() };
-  } catch (error) {
-    ytdlBinary = { ok: false, error: String(error?.message || error).slice(0, 200) };
+
+  const attempts = [];
+  for (const bin of ytdlpCandidates()) {
+    try {
+      const { stdout } = await execFileAsync(bin, ['--version'], {
+        timeout: 8000,
+        windowsHide: true,
+      });
+      ytdlBinary = { ok: true, bin, version: String(stdout).trim() };
+      return ytdlBinary;
+    } catch (error) {
+      attempts.push(`${bin}: ${String(error?.code || error?.message || error).slice(0, 60)}`);
+    }
   }
+
+  ytdlBinary = {
+    ok: false,
+    error: `no yt-dlp binary found. Tried -> ${attempts.join(' | ')}`,
+  };
   return ytdlBinary;
 }
 
@@ -62,6 +93,9 @@ export function resetYtdlpProbe() {
 async function resolveWithYtdlp(id) {
   const probe = await probeYtdlp();
   if (!probe.ok) throw new Error(`yt-dlp unavailable: ${probe.error}`);
+
+  // Use the exact binary that passed the probe, not a re-guess from config.
+  const bin = probe.bin;
 
   const args = [
     '-J',
@@ -78,9 +112,20 @@ async function resolveWithYtdlp(id) {
     args.push('--cookies-from-browser', process.env.YTDLP_COOKIES_FROM_BROWSER);
   }
   if (process.env.YTDLP_PROXY) args.push('--proxy', process.env.YTDLP_PROXY);
+
+  // Shared/datacenter IPs get served a consent interstitial or a bot check
+  // instead of the player response. Let yt-dlp impersonate a browser client,
+  // which is what makes hosted deployments work at all.
+  const client = process.env.YTDLP_PLAYER_CLIENT;
+  if (client) {
+    args.push('--extractor-args', `youtube:player_client=${client}`);
+  } else {
+    args.push('--extractor-args', 'youtube:player_client=default,android,web');
+  }
+
   args.push(`https://www.youtube.com/watch?v=${id}&bpctr=9999999999`);
 
-  const { stdout } = await execFileAsync(config.ytdlpPath, args, {
+  const { stdout } = await execFileAsync(bin, args, {
     timeout: config.upstreamTimeoutMs * 2,
     windowsHide: true,
     maxBuffer: 32 * 1024 * 1024,

@@ -55,8 +55,11 @@ app.get(
       maxQuality: config.maxQuality,
       resolver: {
         ytdlp: ytdlp.ok ? ytdlp.version : null,
+        ytdlpBin: ytdlp.ok ? ytdlp.bin : null,
         ytdlpError: ytdlp.ok ? undefined : ytdlp.error,
-        ytdlCore: true, // presence is probed lazily on first resolve
+        // ytdl-core is installed but is effectively dead against current
+        // YouTube; reported so the settings panel can say so honestly.
+        ytdlCore: 'unreliable',
       },
       cache: cacheStats(),
       signedLinksEphemeral: config.proxySecretIsEphemeral,
