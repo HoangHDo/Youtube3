@@ -214,6 +214,22 @@ test('probing yt-dlp reports the binary that actually worked', async () => {
 });
 
 test('yt-dlp self-provisioning reports honestly instead of throwing', async () => {
+  // Guard the payload check. A Linux PyInstaller bundle starts with "MEI" at
+  // offset 0x2C, not "MZ" - an MZ-only check rejected valid binaries.
+  const { execFileSync } = await import('node:child_process');
+  const script = `
+    const bytes = Buffer.alloc(2_000_000);
+    bytes.write('MZ', 0, 'latin1');
+    bytes.write('MEI\\x0c\\x00\\x00', 0x2c, 'latin1');
+    const isElf = bytes[0] === 0x7f && bytes[1] === 0x45 && bytes[2] === 0x4c && bytes[3] === 0x46;
+    const head2 = bytes.subarray(0, 2).toString('latin1');
+    const pyinstaller = bytes.subarray(0x2c, 0x2f).toString('latin1') === 'MEI';
+    const ok = head2 === 'MZ' || head2 === '#!' || isElf || pyinstaller;
+    if (!ok) { console.log('REJECTED_VALID'); process.exit(1); }
+    console.log('ACCEPTED');
+  `;
+  const result = execFileSync(process.execPath, ['-e', script], { encoding: 'utf8' });
+  assert.match(result, /ACCEPTED/, 'a valid PyInstaller payload would be rejected');
   // The container failure mode: no binary anywhere. ensureYtdlp must resolve
   // with a reason rather than rejecting, or the app cannot boot at all.
   const { ensureYtdlp, inspectVendored } = await import('../server/install.js');

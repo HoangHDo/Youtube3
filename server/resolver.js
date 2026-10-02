@@ -256,13 +256,19 @@ async function reprovisionAndRetry() {
 
   const { ensureYtdlp } = await import('./install.js');
   const result = await ensureYtdlp({ log: (msg) => console.warn(`[resolver] ${msg}`) });
-  if (result.installed || (await probeYtdlp()).ok) {
-    resetYtdlpProbe();
+  resetYtdlpProbe();
+  if ((await probeYtdlp()).ok) {
     console.warn('[resolver] provisioned yt-dlp, retrying');
     return true;
   }
 
-  console.warn(`[resolver] could not provision yt-dlp: ${result.reason}`);
+  // Distinguish "skipped because we are not supposed to install" from a real
+  // failure - the first needs no warning, the second is actionable.
+  if (result.installed) {
+    console.warn(`[resolver] installed yt-dlp but it still does not run: ${result.reason}`);
+  } else if (!/not needed|disabled|already present/.test(result.reason || '')) {
+    console.warn(`[resolver] could not provision yt-dlp: ${result.reason}`);
+  }
   return false;
 }
 

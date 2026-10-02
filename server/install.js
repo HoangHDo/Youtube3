@@ -18,6 +18,9 @@ import { config } from './config.js';
 const RELEASE_API = 'https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest';
 const MIRROR = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download';
 
+/**
+ * Name of the file to download from the GitHub release.
+ */
 const assetName = () =>
   process.platform === 'win32'
     ? 'yt-dlp.exe'
@@ -25,8 +28,17 @@ const assetName = () =>
       ? 'yt-dlp_linux_aarch64'
       : 'yt-dlp_linux';
 
+/**
+ * Name we SAVE it as locally.
+ *
+ * This must be a fixed, platform-appropriate name - NOT the asset name. The
+ * resolver looks for ./bin/yt-dlp, so saving the download as "yt-dlp_linux"
+ * produced a file that was downloaded successfully and then never found.
+ */
+const binaryName = () => (process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
+
 function targetPath() {
-  return path.join(config.root, 'bin', assetName());
+  return path.join(config.root, 'bin', binaryName());
 }
 
 /**
@@ -44,8 +56,18 @@ export async function ensureYtdlp({ timeout = 120_000, log = console.warn } = {}
   }
 
   const target = targetPath();
+
+  // "already present" must mean "present AND runnable". Trusting existence
+  // alone previously reported success for a file the resolver could not use,
+  // which stopped the retry path from ever firing.
   if (fs.existsSync(target)) {
-    return { installed: false, path: target, reason: 'already present' };
+    try {
+      const { stdout } = await runVersion(target);
+      return { installed: false, path: target, version: String(stdout).trim(), reason: 'already present' };
+    } catch (error) {
+      const reason = `present but not runnable (${String(error?.code || error?.message || error)})`;
+      console.warn(`[yt-dlp] ${target} ${reason} - re-downloading`);
+    }
   }
 
   const filename = assetName();
@@ -110,7 +132,7 @@ export async function ensureYtdlp({ timeout = 120_000, log = console.warn } = {}
     await rename(tmp, target);
 
     const { stdout } = await runVersion(target);
-    log(`[yt-dlp] installed ${filename} -> ${target}`);
+    log(`[yt-dlp] installed ${filename} as ${binaryName()} -> ${target}`);
     return { installed: true, path: target, version: String(stdout).trim() };
   } catch (error) {
     try {
