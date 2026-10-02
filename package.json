@@ -1,0 +1,24 @@
+{
+  "name": "cyberstream",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CYBERSTREAM - a Tesla-dashboard-style player that streams video from any YouTube URL in the browser.",
+  "type": "module",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test \"test/*.test.js\"",
+    "doctor": "node scripts/doctor.js",
+    "postinstall": "node scripts/doctor.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "optionalDependencies": {
+    "@distube/ytdl-core": "^4.11.5"
+  }
+}
